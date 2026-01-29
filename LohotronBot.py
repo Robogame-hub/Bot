@@ -2,11 +2,19 @@ import os
 import random
 import time
 import asyncio
+import logging
 import aiosqlite
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.enums import ParseMode
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Получаем токен из переменных окружения или используем значение по умолчанию
 TOKEN = os.getenv("BOT_TOKEN", "8540229374:AAH-V-8TGx7obKTd9FoRc30pSj1I-6rpk88")
@@ -114,6 +122,8 @@ async def init_db():
             last_star_spin INTEGER DEFAULT 0,
             last_star_boost INTEGER DEFAULT 0,
             boost_until INTEGER DEFAULT 0,
+            last_activity INTEGER DEFAULT 0,
+            warning_sent INTEGER DEFAULT 0,
             PRIMARY KEY (user_id, chat_id)
         )
         """)
@@ -133,13 +143,30 @@ def format_slots_display(slots):
     slots_str = "  |  ".join(slots)
     return f"🎰\n━━━━━━━━━━━━━━━━━━\n  {slots_str}\n━━━━━━━━━━━━━━━━━━\n🎰"
 
-def format_slots_animated(slots, step=0):
-    """Создает анимированное отображение слотов (для эффекта кручения)"""
-    # Показываем случайные эмодзи во время "кручения"
-    if step < 3:
-        animated = [random.choice(EMOJIS) for _ in range(5)]
-    else:
-        animated = slots
+def format_slots_animated(slots, current_slot=0, spin_step=0):
+    """Создает анимированное отображение слотов (для эффекта кручения)
+    
+    Args:
+        slots: финальные слоты
+        current_slot: текущий слот, который крутится (0-4)
+        spin_step: шаг кручения текущего слота (0-2, на 3-м фиксируется)
+    """
+    animated = []
+    for i in range(5):
+        if i < current_slot:
+            # Слот уже зафиксирован - показываем финальное значение
+            animated.append(slots[i])
+        elif i == current_slot:
+            # Текущий слот крутится
+            if spin_step < 3:
+                # Показываем случайный эмодзи
+                animated.append(random.choice(EMOJIS))
+            else:
+                # Фиксируем финальное значение
+                animated.append(slots[i])
+        else:
+            # Слот еще не инициализирован - показываем крестик
+            animated.append("❌")
     return format_slots_display(animated)
 
 def format_slots_display(slots):
@@ -148,13 +175,30 @@ def format_slots_display(slots):
     slots_str = " | ".join(slots)
     return f"🎰 [{slots_str}] 🎰"
 
-def format_slots_animated(slots, step=0):
-    """Создает анимированное отображение слотов (для эффекта кручения)"""
-    # Показываем случайные эмодзи во время "кручения"
-    if step < 3:
-        animated = [random.choice(EMOJIS) for _ in range(5)]
-    else:
-        animated = slots
+def format_slots_animated(slots, current_slot=0, spin_step=0):
+    """Создает анимированное отображение слотов (для эффекта кручения)
+    
+    Args:
+        slots: финальные слоты
+        current_slot: текущий слот, который крутится (0-4)
+        spin_step: шаг кручения текущего слота (0-2, на 3-м фиксируется)
+    """
+    animated = []
+    for i in range(5):
+        if i < current_slot:
+            # Слот уже зафиксирован - показываем финальное значение
+            animated.append(slots[i])
+        elif i == current_slot:
+            # Текущий слот крутится
+            if spin_step < 3:
+                # Показываем случайный эмодзи
+                animated.append(random.choice(EMOJIS))
+            else:
+                # Фиксируем финальное значение
+                animated.append(slots[i])
+        else:
+            # Слот еще не инициализирован - показываем крестик
+            animated.append("❌")
     return format_slots_display(animated)
 
 def calc_win(line):
@@ -186,8 +230,23 @@ def calc_win(line):
 
 # ---------------- COMMANDS ----------------
 
+async def update_user_activity(user_id, chat_id):
+    """Обновляет время последней активности пользователя"""
+    try:
+        async with aiosqlite.connect(DB) as db:
+            await db.execute(
+                "UPDATE users SET last_activity=? WHERE user_id=? AND chat_id=?",
+                (now(), user_id, chat_id)
+            )
+            await db.commit()
+    except:
+        pass
+
 @dp.message(Command("startLohotron", "startlohotron", "help"))
 async def start(msg: Message):
+    # Обновляем активность
+    await update_user_activity(msg.from_user.id, msg.chat.id)
+    
     help_text = """
 🎰 <b>ЛОХОТРОН БОТ</b> 🎰
 
@@ -213,12 +272,19 @@ async def spin(msg: Message):
     try:
         user = msg.from_user
         chat_id = msg.chat.id
+        await update_user_activity(user.id, chat_id)
 
         async with aiosqlite.connect(DB) as db:
-            # Создаем пользователя с начальными значениями (100 жетонов, last_daily = 0 для нового пользователя)
+            # Создаем пользователя с начальными значениями
+            current_time = now()
             await db.execute(
-                "INSERT OR IGNORE INTO users (user_id, chat_id, tokens, last_daily) VALUES (?,?,100,0)",
-                (user.id, chat_id)
+                "INSERT OR IGNORE INTO users (user_id, chat_id, tokens, last_daily, last_activity) VALUES (?,?,100,0,?)",
+                (user.id, chat_id, current_time)
+            )
+            # Обновляем активность для существующих пользователей
+            await db.execute(
+                "UPDATE users SET last_activity=? WHERE user_id=? AND chat_id=?",
+                (current_time, user.id, chat_id)
             )
             await db.commit()
 
@@ -263,10 +329,22 @@ async def spin(msg: Message):
             # Отправляем сообщение со слотами (анимация кручения)
             spin_msg = await msg.reply("🎰 Крутим слоты...")
             
-            # Анимация кручения (3 шага)
-            for step in range(3):
-                await asyncio.sleep(0.5)
-                animated_display = format_slots_animated(line, step)
+            # Анимация кручения: каждый слот обновляется 3 раза, затем фиксируется
+            for slot_index in range(5):  # 5 слотов
+                for spin_step in range(3):  # 3 обновления для каждого слота
+                    await asyncio.sleep(0.3)
+                    animated_display = format_slots_animated(line, slot_index, spin_step)
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=spin_msg.message_id,
+                            text=animated_display
+                        )
+                    except:
+                        pass
+                # Фиксируем слот (4-й шаг - показываем финальное значение)
+                await asyncio.sleep(0.2)
+                animated_display = format_slots_animated(line, slot_index, 3)
                 try:
                     await bot.edit_message_text(
                         chat_id=chat_id,
@@ -274,9 +352,9 @@ async def spin(msg: Message):
                         text=animated_display
                     )
                 except:
-                    pass  # Игнорируем ошибки редактирования
+                    pass
             
-            # Финальный результат
+            # Финальный результат (все слоты зафиксированы)
             await asyncio.sleep(0.3)
             final_display = format_slots_display(line)
             try:
@@ -290,10 +368,11 @@ async def spin(msg: Message):
 
             # Обновляем данные в БД
             points += win
+            current_time = now()
             await db.execute("""
-            UPDATE users SET points=?, tokens=?, last_spin=? 
+            UPDATE users SET points=?, tokens=?, last_spin=?, last_activity=? 
             WHERE user_id=? AND chat_id=?
-            """, (points, tokens, now(), user.id, chat_id))
+            """, (points, tokens, current_time, current_time, user.id, chat_id))
             await db.commit()
 
             # Отправляем результаты с кнопками
@@ -316,6 +395,7 @@ async def exchange(msg: Message):
     try:
         user = msg.from_user
         chat_id = msg.chat.id
+        await update_user_activity(user.id, chat_id)
 
         async with aiosqlite.connect(DB) as db:
             cur = await db.execute(
@@ -349,6 +429,7 @@ async def exchange(msg: Message):
 async def rating(msg: Message):
     try:
         chat_id = msg.chat.id
+        await update_user_activity(msg.from_user.id, chat_id)
 
         async with aiosqlite.connect(DB) as db:
             cur = await db.execute("""
@@ -383,6 +464,7 @@ async def inventory(msg: Message):
     try:
         user = msg.from_user
         chat_id = msg.chat.id
+        await update_user_activity(user.id, chat_id)
 
         async with aiosqlite.connect(DB) as db:
             cur = await db.execute(
@@ -393,9 +475,14 @@ async def inventory(msg: Message):
             
             if not row:
                 # Если пользователь еще не играл, создаем запись
+                current_time = now()
                 await db.execute(
-                    "INSERT OR IGNORE INTO users (user_id, chat_id, tokens, last_daily) VALUES (?,?,100,0)",
-                    (user.id, chat_id)
+                    "INSERT OR IGNORE INTO users (user_id, chat_id, tokens, last_daily, last_activity) VALUES (?,?,100,0,?)",
+                    (user.id, chat_id, current_time)
+                )
+                await db.execute(
+                    "UPDATE users SET last_activity=? WHERE user_id=? AND chat_id=?",
+                    (current_time, user.id, chat_id)
                 )
                 await db.commit()
                 tokens, points = 100, 0  # Начальные значения
@@ -416,6 +503,8 @@ async def inventory(msg: Message):
 async def handle_callback(callback: CallbackQuery):
     """Обработчик нажатий на кнопки"""
     try:
+        await update_user_activity(callback.from_user.id, callback.message.chat.id)
+        
         command = callback.data.replace("cmd_", "")
         msg = callback.message
         
@@ -444,6 +533,8 @@ async def handle_test_star_button(callback: CallbackQuery):
     try:
         user = callback.from_user
         chat_id = callback.message.chat.id
+        await update_user_activity(user.id, chat_id)
+        
         data = callback.data
         
         async with aiosqlite.connect(DB) as db:
@@ -469,9 +560,10 @@ async def handle_test_star_button(callback: CallbackQuery):
                 
                 # ТЕСТОВЫЙ РЕЖИМ: сразу выполняем действие без платежа
                 # Обновляем время последней звездной крутки
+                current_time = now()
                 await db.execute(
-                    "UPDATE users SET last_star_spin=? WHERE user_id=? AND chat_id=?",
-                    (now(), user.id, chat_id)
+                    "UPDATE users SET last_star_spin=?, last_activity=? WHERE user_id=? AND chat_id=?",
+                    (current_time, current_time, user.id, chat_id)
                 )
                 # Сбрасываем таймер обычной крутки
                 await db.execute(
@@ -493,11 +585,12 @@ async def handle_test_star_button(callback: CallbackQuery):
                 
                 # ТЕСТОВЫЙ РЕЖИМ: сразу выполняем действие без платежа
                 # Обновляем время последнего буста и устанавливаем время окончания буста
-                boost_until = now() + STAR_BOOST_DURATION
-                await db.execute(
-                    "UPDATE users SET last_star_boost=?, boost_until=? WHERE user_id=? AND chat_id=?",
-                    (now(), boost_until, user.id, chat_id)
-                )
+                    current_time = now()
+                    boost_until = current_time + STAR_BOOST_DURATION
+                    await db.execute(
+                        "UPDATE users SET last_star_boost=?, boost_until=?, last_activity=? WHERE user_id=? AND chat_id=?",
+                        (current_time, boost_until, current_time, user.id, chat_id)
+                    )
                 await db.commit()
                 
                 await bot.send_message(
@@ -542,10 +635,22 @@ async def perform_spin(user_id, chat_id, star_spin=False):
             # Отправляем сообщение со слотами (анимация кручения)
             spin_msg = await bot.send_message(chat_id=chat_id, text="🎰 Крутим слоты...")
             
-            # Анимация кручения (3 шага)
-            for step in range(3):
-                await asyncio.sleep(0.5)
-                animated_display = format_slots_animated(line, step)
+            # Анимация кручения: каждый слот обновляется 3 раза, затем фиксируется
+            for slot_index in range(5):  # 5 слотов
+                for spin_step in range(3):  # 3 обновления для каждого слота
+                    await asyncio.sleep(0.3)
+                    animated_display = format_slots_animated(line, slot_index, spin_step)
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=spin_msg.message_id,
+                            text=animated_display
+                        )
+                    except:
+                        pass
+                # Фиксируем слот (4-й шаг - показываем финальное значение)
+                await asyncio.sleep(0.2)
+                animated_display = format_slots_animated(line, slot_index, 3)
                 try:
                     await bot.edit_message_text(
                         chat_id=chat_id,
@@ -555,7 +660,7 @@ async def perform_spin(user_id, chat_id, star_spin=False):
                 except:
                     pass
             
-            # Финальный результат
+            # Финальный результат (все слоты зафиксированы)
             await asyncio.sleep(0.3)
             final_display = format_slots_display(line)
             try:
@@ -568,10 +673,11 @@ async def perform_spin(user_id, chat_id, star_spin=False):
                 pass
             
             points += win
+            current_time = now()
             await db.execute("""
-            UPDATE users SET points=?, tokens=?, last_spin=? 
+            UPDATE users SET points=?, tokens=?, last_spin=?, last_activity=? 
             WHERE user_id=? AND chat_id=?
-            """, (points, tokens, now(), user_id, chat_id))
+            """, (points, tokens, current_time, current_time, user_id, chat_id))
             await db.commit()
             
             # Отправляем результаты с кнопками
@@ -589,6 +695,79 @@ async def perform_spin(user_id, chat_id, star_spin=False):
             )
     except Exception as e:
         logger.error(f"Ошибка выполнения крутки: {e}")
+
+# ---------------- INACTIVE USERS CLEANUP ----------------
+
+async def check_inactive_users():
+    """Проверяет неактивных пользователей и отправляет предупреждения/удаляет данные"""
+    try:
+        current_time = now()
+        three_days = 3 * 86400  # 3 дня в секундах
+        five_days = 5 * 86400   # 5 дней в секундах
+        
+        async with aiosqlite.connect(DB) as db:
+            # Получаем всех пользователей с их активностью
+            cur = await db.execute(
+                "SELECT user_id, chat_id, last_activity, warning_sent FROM users WHERE last_activity > 0"
+            )
+            users = await cur.fetchall()
+            
+            for user_id, chat_id, last_activity, warning_sent in users:
+                inactive_time = current_time - last_activity
+                
+                # Предупреждение на 3-й день (если еще не отправляли)
+                if inactive_time >= three_days and inactive_time < five_days and warning_sent == 0:
+                    try:
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text="⚠️ <b>Предупреждение!</b>\n\n"
+                                 "Вы не заходили в бота уже 3 дня.\n"
+                                 "Если не зайдете в течение 2 дней, ваши данные будут удалены.\n\n"
+                                 "Используйте любую команду бота, чтобы сохранить прогресс!",
+                            parse_mode=ParseMode.HTML
+                        )
+                        await db.execute(
+                            "UPDATE users SET warning_sent=1 WHERE user_id=? AND chat_id=?",
+                            (user_id, chat_id)
+                        )
+                        await db.commit()
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки предупреждения пользователю {user_id}: {e}")
+                
+                # Финальное предупреждение и удаление на 5-й день
+                elif inactive_time >= five_days:
+                    try:
+                        # Отправляем финальное предупреждение
+                        if warning_sent == 1:  # Если уже отправляли первое предупреждение
+                            await bot.send_message(
+                                chat_id=chat_id,
+                                text="❌ <b>Ваши данные удалены</b>\n\n"
+                                     "Вы не заходили в бота 5 дней.\n"
+                                     "Все ваши данные (очки, жетоны, прогресс) были удалены.\n\n"
+                                     "Используйте /startLohotron для начала заново.",
+                                parse_mode=ParseMode.HTML
+                            )
+                        # Удаляем данные пользователя
+                        await db.execute(
+                            "DELETE FROM users WHERE user_id=? AND chat_id=?",
+                            (user_id, chat_id)
+                        )
+                        await db.commit()
+                        logger.info(f"Удалены данные неактивного пользователя {user_id} из чата {chat_id}")
+                    except Exception as e:
+                        logger.error(f"Ошибка удаления данных пользователя {user_id}: {e}")
+    except Exception as e:
+        logger.error(f"Ошибка проверки неактивных пользователей: {e}")
+
+async def cleanup_task():
+    """Периодическая задача для проверки неактивных пользователей"""
+    while True:
+        try:
+            await check_inactive_users()
+        except Exception as e:
+            logger.error(f"Ошибка в задаче очистки: {e}")
+        # Проверяем раз в день (86400 секунд)
+        await asyncio.sleep(86400)
 
 # ---------------- START ----------------
 
