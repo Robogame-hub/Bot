@@ -127,6 +127,36 @@ def now():
 def spin_result():
     return [random.choice(EMOJIS) for _ in range(5)]
 
+def format_slots_display(slots):
+    """Форматирует слоты для красивого отображения с разделением ячеек"""
+    # Создаем визуальное разделение ячеек
+    slots_str = "  |  ".join(slots)
+    return f"🎰\n━━━━━━━━━━━━━━━━━━\n  {slots_str}\n━━━━━━━━━━━━━━━━━━\n🎰"
+
+def format_slots_animated(slots, step=0):
+    """Создает анимированное отображение слотов (для эффекта кручения)"""
+    # Показываем случайные эмодзи во время "кручения"
+    if step < 3:
+        animated = [random.choice(EMOJIS) for _ in range(5)]
+    else:
+        animated = slots
+    return format_slots_display(animated)
+
+def format_slots_display(slots):
+    """Форматирует слоты для красивого отображения с разделением ячеек"""
+    # Создаем визуальное разделение ячеек
+    slots_str = " | ".join(slots)
+    return f"🎰 [{slots_str}] 🎰"
+
+def format_slots_animated(slots, step=0):
+    """Создает анимированное отображение слотов (для эффекта кручения)"""
+    # Показываем случайные эмодзи во время "кручения"
+    if step < 3:
+        animated = [random.choice(EMOJIS) for _ in range(5)]
+    else:
+        animated = slots
+    return format_slots_display(animated)
+
 def calc_win(line):
     counts = {e: line.count(e) for e in set(line)}
     
@@ -223,21 +253,53 @@ async def spin(msg: Message):
                 boost_text = " (буст активен!)" if (boost_until and now() < boost_until) else ""
                 return await msg.reply(f"⏳ Крутить можно через {wait//60} мин {wait%60} сек{boost_text}", reply_markup=await get_keyboard_with_stars(user.id, chat_id))
 
+            # Генерируем результат
             line = spin_result()
             win, text = calc_win(line)
 
+            # Списываем жетоны
             tokens -= SPIN_COST
-            points += win
 
+            # Отправляем сообщение со слотами (анимация кручения)
+            spin_msg = await msg.reply("🎰 Крутим слоты...")
+            
+            # Анимация кручения (3 шага)
+            for step in range(3):
+                await asyncio.sleep(0.5)
+                animated_display = format_slots_animated(line, step)
+                try:
+                    await bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=spin_msg.message_id,
+                        text=animated_display
+                    )
+                except:
+                    pass  # Игнорируем ошибки редактирования
+            
+            # Финальный результат
+            await asyncio.sleep(0.3)
+            final_display = format_slots_display(line)
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=spin_msg.message_id,
+                    text=final_display
+                )
+            except:
+                pass
+
+            # Обновляем данные в БД
+            points += win
             await db.execute("""
             UPDATE users SET points=?, tokens=?, last_spin=? 
             WHERE user_id=? AND chat_id=?
             """, (points, tokens, now(), user.id, chat_id))
             await db.commit()
 
+            # Отправляем результаты с кнопками
+            await asyncio.sleep(0.5)
             boost_text = " ⚡ (Буст активен!)" if (boost_until and now() < boost_until) else ""
             await msg.reply(
-                f"🎰 {' | '.join(line)}\n"
                 f"👉 {text}\n"
                 f"🏆 +{win} очков\n"
                 f"💰 Очки: {points}\n"
@@ -476,21 +538,50 @@ async def perform_spin(user_id, chat_id, star_spin=False):
             win, text = calc_win(line)
             
             tokens -= SPIN_COST
-            points += win
             
+            # Отправляем сообщение со слотами (анимация кручения)
+            spin_msg = await bot.send_message(chat_id=chat_id, text="🎰 Крутим слоты...")
+            
+            # Анимация кручения (3 шага)
+            for step in range(3):
+                await asyncio.sleep(0.5)
+                animated_display = format_slots_animated(line, step)
+                try:
+                    await bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=spin_msg.message_id,
+                        text=animated_display
+                    )
+                except:
+                    pass
+            
+            # Финальный результат
+            await asyncio.sleep(0.3)
+            final_display = format_slots_display(line)
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=spin_msg.message_id,
+                    text=final_display
+                )
+            except:
+                pass
+            
+            points += win
             await db.execute("""
             UPDATE users SET points=?, tokens=?, last_spin=? 
             WHERE user_id=? AND chat_id=?
             """, (points, tokens, now(), user_id, chat_id))
             await db.commit()
             
+            # Отправляем результаты с кнопками
+            await asyncio.sleep(0.5)
             boost_text = " ⚡ (Буст активен!)" if (boost_until and now() < boost_until) else ""
             star_text = " ⭐ (Вне очереди!)" if star_spin else ""
             
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"🎰 {' | '.join(line)}\n"
-                     f"👉 {text}\n"
+                text=f"👉 {text}\n"
                      f"🏆 +{win} очков\n"
                      f"💰 Очки: {points}\n"
                      f"🎟 Жетоны: {tokens}{boost_text}{star_text}",
