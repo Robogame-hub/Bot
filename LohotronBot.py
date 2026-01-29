@@ -5,7 +5,7 @@ import asyncio
 import aiosqlite
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.enums import ParseMode
 
 # Получаем токен из переменных окружения или используем значение по умолчанию
@@ -17,6 +17,24 @@ dp = Dispatcher()
 DB = "lohotron.db"
 
 EMOJIS = ["🍎", "🍌", "🍺", "💩", "🤡", "🐸", "🍩", "⭐"]
+
+# Клавиатура с кнопками команд (используем описания из setup_commands.py)
+def get_command_keyboard():
+    """Создает клавиатуру с кнопками команд"""
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🎰 Крутить слот-машину", callback_data="cmd_spinlohotron"),
+            InlineKeyboardButton(text="📦 Показать жетоны и очки", callback_data="cmd_myinventory")
+        ],
+        [
+            InlineKeyboardButton(text="🔄 Обменять очки на жетоны", callback_data="cmd_exchangelohotron"),
+            InlineKeyboardButton(text="🏆 ТОП-10 игроков чата", callback_data="cmd_ratinglohotron")
+        ],
+        [
+            InlineKeyboardButton(text="ℹ️ Справка и правила игры", callback_data="cmd_startlohotron")
+        ]
+    ])
+    return keyboard
 
 SPIN_COST = 15
 COOLDOWN = 600  # 10 минут
@@ -95,7 +113,7 @@ async def start(msg: Message):
 
 Удачи! 🍀
 """
-    await msg.reply(help_text, parse_mode=ParseMode.HTML)
+    await msg.reply(help_text, parse_mode=ParseMode.HTML, reply_markup=get_command_keyboard())
 
 @dp.message(Command("spinLohotron", "spinlohotron"))
 async def spin(msg: Message):
@@ -128,14 +146,14 @@ async def spin(msg: Message):
                     (tokens, now(), user.id, chat_id)
                 )
                 await db.commit()
-                await msg.reply(f"🎁 Получено {DAILY_TOKENS} ежедневных жетонов!")
+                await msg.reply(f"🎁 Получено {DAILY_TOKENS} ежедневных жетонов!", reply_markup=get_command_keyboard())
 
             if tokens < SPIN_COST:
-                return await msg.reply("❌ Недостаточно жетонов!")
+                return await msg.reply("❌ Недостаточно жетонов!", reply_markup=get_command_keyboard())
 
             if now() - last_spin < COOLDOWN:
                 wait = COOLDOWN - (now() - last_spin)
-                return await msg.reply(f"⏳ Крутить можно через {wait//60} мин {wait%60} сек")
+                return await msg.reply(f"⏳ Крутить можно через {wait//60} мин {wait%60} сек", reply_markup=get_command_keyboard())
 
             line = spin_result()
             win, text = calc_win(line)
@@ -154,10 +172,11 @@ async def spin(msg: Message):
             f"👉 {text}\n"
             f"🏆 +{win} очков\n"
             f"💰 Очки: {points}\n"
-            f"🎟 Жетоны: {tokens}"
+            f"🎟 Жетоны: {tokens}",
+            reply_markup=get_command_keyboard()
         )
     except Exception as e:
-        await msg.reply(f"❌ Произошла ошибка: {str(e)}")
+        await msg.reply(f"❌ Произошла ошибка: {str(e)}", reply_markup=get_command_keyboard())
 
 # ---------------- EXCHANGE ----------------
 
@@ -174,11 +193,11 @@ async def exchange(msg: Message):
             )
             row = await cur.fetchone()
             if not row:
-                return await msg.reply("❌ Вы еще не играли. Используйте /spin для начала игры.")
+                return await msg.reply("❌ Вы еще не играли. Используйте /spin для начала игры.", reply_markup=get_command_keyboard())
 
             points, tokens = row
             if points < 50:
-                return await msg.reply("❌ Нужно минимум 50 очков")
+                return await msg.reply("❌ Нужно минимум 50 очков", reply_markup=get_command_keyboard())
 
             points -= 50
             tokens += 5
@@ -189,9 +208,9 @@ async def exchange(msg: Message):
             )
             await db.commit()
 
-        await msg.reply("🔄 Обмен выполнен: -50 очков → +5 жетонов")
+        await msg.reply("🔄 Обмен выполнен: -50 очков → +5 жетонов", reply_markup=get_command_keyboard())
     except Exception as e:
-        await msg.reply(f"❌ Произошла ошибка: {str(e)}")
+        await msg.reply(f"❌ Произошла ошибка: {str(e)}", reply_markup=get_command_keyboard())
 
 # ---------------- RATING ----------------
 
@@ -208,7 +227,7 @@ async def rating(msg: Message):
             rows = await cur.fetchall()
 
         if not rows:
-            return await msg.reply("📊 Пока нет игроков в этом чате")
+            return await msg.reply("📊 Пока нет игроков в этом чате", reply_markup=get_command_keyboard())
 
         text = "🏆 <b>ТОП-10 ЛОХОВ ЧАТА</b>\n\n"
         for i, (uid, pts) in enumerate(rows, 1):
@@ -222,9 +241,9 @@ async def rating(msg: Message):
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
             text += f"{medal} {name} — {pts} очков\n"
 
-        await msg.reply(text, parse_mode=ParseMode.HTML)
+        await msg.reply(text, parse_mode=ParseMode.HTML, reply_markup=get_command_keyboard())
     except Exception as e:
-        await msg.reply(f"❌ Произошла ошибка: {str(e)}")
+        await msg.reply(f"❌ Произошла ошибка: {str(e)}", reply_markup=get_command_keyboard())
 
 # ---------------- INVENTORY ----------------
 
@@ -256,9 +275,35 @@ async def inventory(msg: Message):
 Жетонов: {tokens}
 Очков: {points}"""
         
-        await msg.reply(text)
+        await msg.reply(text, reply_markup=get_command_keyboard())
     except Exception as e:
-        await msg.reply(f"❌ Произошла ошибка: {str(e)}")
+        await msg.reply(f"❌ Произошла ошибка: {str(e)}", reply_markup=get_command_keyboard())
+
+# ---------------- CALLBACK HANDLERS ----------------
+
+@dp.callback_query(lambda c: c.data.startswith("cmd_"))
+async def handle_callback(callback: CallbackQuery):
+    """Обработчик нажатий на кнопки"""
+    try:
+        command = callback.data.replace("cmd_", "")
+        msg = callback.message
+        
+        # Вызываем соответствующую команду, используя сообщение из callback
+        if command == "spinlohotron":
+            await spin(msg)
+        elif command == "exchangelohotron":
+            await exchange(msg)
+        elif command == "ratinglohotron":
+            await rating(msg)
+        elif command == "myinventory":
+            await inventory(msg)
+        elif command == "startlohotron":
+            await start(msg)
+        
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Ошибка в обработчике кнопок: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
 
 # ---------------- START ----------------
 
