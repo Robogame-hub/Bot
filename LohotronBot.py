@@ -8,7 +8,25 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.enums import ParseMode
-from config import *
+from config import (
+    INITIAL_TOKENS, SPIN_COST, DAILY_TOKENS, EXCHANGE_POINTS_COST, EXCHANGE_TOKENS_REWARD,
+    COOLDOWN, COOLDOWN_BOOSTED, COOLDOWN_MINUTES,
+    EMOJIS, WIN_2_MATCH, WIN_3_MATCH, WIN_4_MATCH, WIN_5_MATCH, WIN_JACKPOT,
+    ENABLE_STAR_SPIN, ENABLE_STAR_BOOST, STAR_SPIN_COST, STAR_SPIN_COOLDOWN,
+    STAR_BOOST_COST, STAR_BOOST_DURATION, STAR_BOOST_COOLDOWN,
+    WARNING_INACTIVE_DAYS, DELETE_INACTIVE_DAYS,
+    ANIMATION_STEP_DELAY, ANIMATION_FIX_DELAY, ANIMATION_FINAL_DELAY, SLOT_SPIN_STEPS,
+    TEXT_START, TEXT_ERROR_NOT_ENOUGH_TOKENS, TEXT_ERROR_COOLDOWN, TEXT_ERROR_USER_NOT_FOUND,
+    TEXT_ERROR_GENERAL, TEXT_ERROR_NOT_PLAYED, TEXT_ERROR_NOT_ENOUGH_POINTS, TEXT_ERROR_NO_PLAYERS,
+    TEXT_DAILY_TOKENS, TEXT_EXCHANGE_SUCCESS, TEXT_SPINNING,
+    TEXT_RESULT_WIN, TEXT_RESULT_POINTS, TEXT_RESULT_POINTS_TOTAL, TEXT_RESULT_TOKENS,
+    TEXT_BOOST_ACTIVE, TEXT_STAR_SPIN,
+    TEXT_INVENTORY, TEXT_RATING_HEADER, TEXT_RATING_ITEM,
+    TEXT_STAR_SPIN_BUTTON, TEXT_STAR_BOOST_BUTTON, TEXT_STAR_SPIN_SUCCESS, TEXT_STAR_BOOST_SUCCESS,
+    TEXT_STAR_BOOST_ACTIVATED, TEXT_STAR_BUTTON_COOLDOWN, TEXT_STAR_ERROR,
+    TEXT_WARNING_INACTIVE, TEXT_DELETE_INACTIVE,
+    BUTTON_SPIN, BUTTON_INVENTORY, BUTTON_EXCHANGE, BUTTON_RATING, BUTTON_HELP
+)
 
 # Настройка логирования
 logging.basicConfig(
@@ -80,13 +98,13 @@ async def get_keyboard_with_stars(user_id, chat_id):
             # Кнопка крутки за 1 звезду (если прошло 10 минут) - ТЕСТОВЫЙ РЕЖИМ
             if ENABLE_STAR_SPIN and current_time - last_star_spin >= STAR_SPIN_COOLDOWN:
                 star_buttons.append(
-                    InlineKeyboardButton(text="⭐ Крутить вне очереди (1⭐ ТЕСТ)", callback_data="test_star_spin_1")
+                    InlineKeyboardButton(text=TEXT_STAR_SPIN_BUTTON, callback_data="test_star_spin_1")
                 )
             
             # Кнопка буста за 3 звезды (если прошло 1 час) - ТЕСТОВЫЙ РЕЖИМ
             if ENABLE_STAR_BOOST and current_time - last_star_boost >= STAR_BOOST_COOLDOWN:
                 star_buttons.append(
-                    InlineKeyboardButton(text="⚡ Уменьшить интервал на 1ч (3⭐ ТЕСТ)", callback_data="test_star_boost_3")
+                    InlineKeyboardButton(text=TEXT_STAR_BOOST_BUTTON, callback_data="test_star_boost_3")
                 )
         
         if star_buttons:
@@ -263,24 +281,19 @@ async def start(msg: Message):
     # Обновляем активность
     await update_user_activity(msg.from_user.id, msg.chat.id)
     
-    help_text = """
-🎰 <b>ЛОХОТРОН БОТ</b> 🎰
-
-<b>Команды:</b>
-/spinLohotron@LohotronRuletBot - Крутить слот-машину (15 жетонов)
-/exchangeLohotron@LohotronRuletBot - Обменять 50 очков на 5 жетонов
-/ratingLohotron@LohotronRuletBot - ТОП-10 игроков чата
-/myInventory@LohotronRuletBot - Показать ваши жетоны и очки
-
-<b>Правила:</b>
-• Начальное количество: 100 жетонов
-• Каждый день получаешь 50 жетонов
-• Кулдаун между крутками: 10 минут
-• Выигрыши: 2 одинаковых = 5 очков, 3 = 7 очков, 4 = 10 очков, 5 = 15 очков
-• 5 звезд ⭐ = 30 очков (ДЖЕКПОТ!)
-
-Удачи! 🍀
-"""
+    help_text = TEXT_START.format(
+        SPIN_COST=SPIN_COST,
+        EXCHANGE_POINTS_COST=EXCHANGE_POINTS_COST,
+        EXCHANGE_TOKENS_REWARD=EXCHANGE_TOKENS_REWARD,
+        INITIAL_TOKENS=INITIAL_TOKENS,
+        DAILY_TOKENS=DAILY_TOKENS,
+        COOLDOWN_MINUTES=COOLDOWN_MINUTES,
+        WIN_2_MATCH=WIN_2_MATCH,
+        WIN_3_MATCH=WIN_3_MATCH,
+        WIN_4_MATCH=WIN_4_MATCH,
+        WIN_5_MATCH=WIN_5_MATCH,
+        WIN_JACKPOT=WIN_JACKPOT
+    )
     await msg.reply(help_text, parse_mode=ParseMode.HTML, reply_markup=await get_keyboard_with_stars(msg.from_user.id, msg.chat.id))
 
 @dp.message(Command("spinLohotron", "spinlohotron"))
@@ -310,7 +323,7 @@ async def spin(msg: Message):
             )
             row = await cur.fetchone()
             if not row:
-                return await msg.reply("❌ Ошибка при получении данных пользователя", reply_markup=await get_keyboard_with_stars(user.id, chat_id))
+                return await msg.reply(TEXT_ERROR_USER_NOT_FOUND, reply_markup=await get_keyboard_with_stars(user.id, chat_id))
             
             points, tokens, last_spin, last_daily, boost_until = row
             
@@ -325,15 +338,15 @@ async def spin(msg: Message):
                     (tokens, now(), user.id, chat_id)
                 )
                 await db.commit()
-                await msg.reply(f"🎁 Получено {DAILY_TOKENS} ежедневных жетонов!", reply_markup=await get_keyboard_with_stars(user.id, chat_id))
+                await msg.reply(TEXT_DAILY_TOKENS.format(tokens=DAILY_TOKENS), reply_markup=await get_keyboard_with_stars(user.id, chat_id))
 
             if tokens < SPIN_COST:
-                return await msg.reply("❌ Недостаточно жетонов!", reply_markup=await get_keyboard_with_stars(user.id, chat_id))
+                return await msg.reply(TEXT_ERROR_NOT_ENOUGH_TOKENS, reply_markup=await get_keyboard_with_stars(user.id, chat_id))
 
             if now() - last_spin < current_cooldown:
                 wait = current_cooldown - (now() - last_spin)
                 boost_text = " (буст активен!)" if (boost_until and now() < boost_until) else ""
-                return await msg.reply(f"⏳ Крутить можно через {wait//60} мин {wait%60} сек{boost_text}", reply_markup=await get_keyboard_with_stars(user.id, chat_id))
+                return await msg.reply(TEXT_ERROR_COOLDOWN.format(minutes=wait//60, seconds=wait%60, boost_text=boost_text), reply_markup=await get_keyboard_with_stars(user.id, chat_id))
 
             # Генерируем результат
             line = spin_result()
@@ -343,7 +356,7 @@ async def spin(msg: Message):
             tokens -= SPIN_COST
 
             # Отправляем сообщение со слотами (анимация кручения) - новым сообщением
-            spin_msg = await bot.send_message(chat_id=chat_id, text="🎰 Крутим слоты...")
+            spin_msg = await bot.send_message(chat_id=chat_id, text=TEXT_SPINNING)
             
             # Анимация кручения: каждый слот обновляется 3 раза, затем фиксируется
             for slot_index in range(5):  # 5 слотов
@@ -393,18 +406,18 @@ async def spin(msg: Message):
 
             # Отправляем результаты с кнопками - ответом на сообщение со слотами
             await asyncio.sleep(0.5)
-            boost_text = " ⚡ (Буст активен!)" if (boost_until and now() < boost_until) else ""
+            boost_text = TEXT_BOOST_ACTIVE if (boost_until and now() < boost_until) else ""
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"👉 {text}\n"
-                     f"🏆 +{win} очков\n"
-                     f"💰 Очки: {points}\n"
-                     f"🎟 Жетоны: {tokens}{boost_text}",
+                text=f"{TEXT_RESULT_WIN.format(text=text)}\n"
+                     f"{TEXT_RESULT_POINTS.format(win=win)}\n"
+                     f"{TEXT_RESULT_POINTS_TOTAL.format(points=points)}\n"
+                     f"{TEXT_RESULT_TOKENS.format(tokens=tokens)}{boost_text}",
                 reply_to_message_id=spin_msg.message_id,
                 reply_markup=await get_keyboard_with_stars(user.id, chat_id)
             )
     except Exception as e:
-        await msg.reply(f"❌ Произошла ошибка: {str(e)}", reply_markup=await get_keyboard_with_stars(msg.from_user.id, msg.chat.id))
+        await msg.reply(TEXT_ERROR_GENERAL.format(error=str(e)), reply_markup=await get_keyboard_with_stars(msg.from_user.id, msg.chat.id))
 
 # ---------------- EXCHANGE ----------------
 
@@ -422,11 +435,11 @@ async def exchange(msg: Message):
             )
             row = await cur.fetchone()
             if not row:
-                return await msg.reply("❌ Вы еще не играли. Используйте /spin для начала игры.", reply_markup=await get_keyboard_with_stars(user.id, chat_id))
+                return await msg.reply(TEXT_ERROR_NOT_PLAYED, reply_markup=await get_keyboard_with_stars(user.id, chat_id))
 
             points, tokens = row
             if points < 50:
-                return await msg.reply("❌ Нужно минимум 50 очков", reply_markup=await get_keyboard_with_stars(user.id, chat_id))
+                return await msg.reply(TEXT_ERROR_NOT_ENOUGH_POINTS.format(points=EXCHANGE_POINTS_COST), reply_markup=await get_keyboard_with_stars(user.id, chat_id))
 
             points -= 50
             tokens += 5
@@ -437,9 +450,9 @@ async def exchange(msg: Message):
             )
             await db.commit()
 
-        await msg.reply("🔄 Обмен выполнен: -50 очков → +5 жетонов", reply_markup=await get_keyboard_with_stars(user.id, chat_id))
+        await msg.reply(TEXT_EXCHANGE_SUCCESS.format(points=EXCHANGE_POINTS_COST, tokens=EXCHANGE_TOKENS_REWARD), reply_markup=await get_keyboard_with_stars(user.id, chat_id))
     except Exception as e:
-        await msg.reply(f"❌ Произошла ошибка: {str(e)}", reply_markup=await get_keyboard_with_stars(msg.from_user.id, msg.chat.id))
+        await msg.reply(TEXT_ERROR_GENERAL.format(error=str(e)), reply_markup=await get_keyboard_with_stars(msg.from_user.id, msg.chat.id))
 
 # ---------------- RATING ----------------
 
@@ -459,7 +472,7 @@ async def rating(msg: Message):
         if not rows:
             return await msg.reply("📊 Пока нет игроков в этом чате", reply_markup=await get_keyboard_with_stars(msg.from_user.id, chat_id))
 
-        text = "🏆 <b>ТОП-10 ЛОХОВ ЧАТА</b>\n\n"
+        text = TEXT_RATING_HEADER
         for i, (uid, pts) in enumerate(rows, 1):
             # Пытаемся получить имя пользователя из чата
             try:
@@ -469,11 +482,11 @@ async def rating(msg: Message):
                 name = f"User {uid}"
             
             medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else f"{i}."
-            text += f"{medal} {name} — {pts} очков\n"
+            text += TEXT_RATING_ITEM.format(place=f"{medal} {i+1}", name=name, points=pts) + "\n"
 
         await msg.reply(text, parse_mode=ParseMode.HTML, reply_markup=await get_keyboard_with_stars(msg.from_user.id, chat_id))
     except Exception as e:
-        await msg.reply(f"❌ Произошла ошибка: {str(e)}", reply_markup=await get_keyboard_with_stars(msg.from_user.id, msg.chat.id))
+        await msg.reply(TEXT_ERROR_GENERAL.format(error=str(e)), reply_markup=await get_keyboard_with_stars(msg.from_user.id, msg.chat.id))
 
 # ---------------- INVENTORY ----------------
 
@@ -511,9 +524,9 @@ async def inventory(msg: Message):
 Жетонов: {tokens}
 Очков: {points}"""
         
-        await msg.reply(text, reply_markup=await get_keyboard_with_stars(user.id, chat_id))
+        await msg.reply(TEXT_INVENTORY.format(tokens=tokens, points=points), reply_markup=await get_keyboard_with_stars(user.id, chat_id))
     except Exception as e:
-        await msg.reply(f"❌ Произошла ошибка: {str(e)}", reply_markup=await get_keyboard_with_stars(msg.from_user.id, msg.chat.id))
+        await msg.reply(TEXT_ERROR_GENERAL.format(error=str(e)), reply_markup=await get_keyboard_with_stars(msg.from_user.id, msg.chat.id))
 
 # ---------------- CALLBACK HANDLERS ----------------
 
@@ -563,7 +576,7 @@ async def handle_test_star_button(callback: CallbackQuery):
             )
             row = await cur.fetchone()
             if not row:
-                await callback.answer("❌ Ошибка получения данных", show_alert=True)
+                await callback.answer(TEXT_STAR_ERROR, show_alert=True)
                 return
             
             last_star_spin, last_star_boost = row
@@ -573,7 +586,7 @@ async def handle_test_star_button(callback: CallbackQuery):
                 # Проверяем кулдаун
                 if current_time - last_star_spin < STAR_SPIN_COOLDOWN:
                     wait = STAR_SPIN_COOLDOWN - (current_time - last_star_spin)
-                    await callback.answer(f"⏳ Кнопка будет доступна через {wait//60} мин", show_alert=True)
+                    await callback.answer(TEXT_STAR_BUTTON_COOLDOWN.format(minutes=wait//60), show_alert=True)
                     return
                 
                 # ТЕСТОВЫЙ РЕЖИМ: сразу выполняем действие без платежа
@@ -592,13 +605,13 @@ async def handle_test_star_button(callback: CallbackQuery):
                 
                 # Выполняем крутку
                 await perform_spin(user.id, chat_id, star_spin=True)
-                await callback.answer("✅ Крутка вне очереди выполнена! (ТЕСТ)", show_alert=False)
+                await callback.answer(TEXT_STAR_SPIN_SUCCESS, show_alert=False)
                 
             elif data == "test_star_boost_3":
                 # Проверяем кулдаун
                 if current_time - last_star_boost < STAR_BOOST_COOLDOWN:
                     wait = STAR_BOOST_COOLDOWN - (current_time - last_star_boost)
-                    await callback.answer(f"⏳ Кнопка будет доступна через {wait//60} мин", show_alert=True)
+                    await callback.answer(TEXT_STAR_BUTTON_COOLDOWN.format(minutes=wait//60), show_alert=True)
                     return
                 
                 # ТЕСТОВЫЙ РЕЖИМ: сразу выполняем действие без платежа
@@ -613,10 +626,10 @@ async def handle_test_star_button(callback: CallbackQuery):
                 
                 await bot.send_message(
                     chat_id=chat_id,
-                    text=f"⚡ Буст активирован! Интервал круток уменьшен до 5 минут на 1 час! (ТЕСТ)",
+                    text=TEXT_STAR_BOOST_ACTIVATED,
                     reply_markup=await get_keyboard_with_stars(user.id, chat_id)
                 )
-                await callback.answer("✅ Буст активирован! (ТЕСТ)", show_alert=False)
+                await callback.answer(TEXT_STAR_BOOST_SUCCESS, show_alert=False)
         
     except Exception as e:
         logger.error(f"Ошибка в обработчике тестовых звездных кнопок: {e}")
@@ -651,7 +664,7 @@ async def perform_spin(user_id, chat_id, star_spin=False):
             tokens -= SPIN_COST
             
             # Отправляем сообщение со слотами (анимация кручения)
-            spin_msg = await bot.send_message(chat_id=chat_id, text="🎰 Крутим слоты...")
+            spin_msg = await bot.send_message(chat_id=chat_id, text=TEXT_SPINNING)
             
             # Анимация кручения: каждый слот обновляется 3 раза, затем фиксируется
             for slot_index in range(5):  # 5 слотов
@@ -700,15 +713,15 @@ async def perform_spin(user_id, chat_id, star_spin=False):
             
             # Отправляем результаты с кнопками
             await asyncio.sleep(0.5)
-            boost_text = " ⚡ (Буст активен!)" if (boost_until and now() < boost_until) else ""
-            star_text = " ⭐ (Вне очереди!)" if star_spin else ""
+            boost_text = TEXT_BOOST_ACTIVE if (boost_until and now() < boost_until) else ""
+            star_text = TEXT_STAR_SPIN if star_spin else ""
             
             await bot.send_message(
                 chat_id=chat_id,
-                text=f"👉 {text}\n"
-                     f"🏆 +{win} очков\n"
-                     f"💰 Очки: {points}\n"
-                     f"🎟 Жетоны: {tokens}{boost_text}{star_text}",
+                text=f"{TEXT_RESULT_WIN.format(text=text)}\n"
+                     f"{TEXT_RESULT_POINTS.format(win=win)}\n"
+                     f"{TEXT_RESULT_POINTS_TOTAL.format(points=points)}\n"
+                     f"{TEXT_RESULT_TOKENS.format(tokens=tokens)}{boost_text}{star_text}",
                 reply_to_message_id=spin_msg.message_id,
                 reply_markup=await get_keyboard_with_stars(user_id, chat_id)
             )
@@ -739,10 +752,7 @@ async def check_inactive_users():
                     try:
                         await bot.send_message(
                             chat_id=chat_id,
-                            text="⚠️ <b>Предупреждение!</b>\n\n"
-                                 "Вы не заходили в бота уже 3 дня.\n"
-                                 "Если не зайдете в течение 2 дней, ваши данные будут удалены.\n\n"
-                                 "Используйте любую команду бота, чтобы сохранить прогресс!",
+                            text=TEXT_WARNING_INACTIVE,
                             parse_mode=ParseMode.HTML
                         )
                         await db.execute(
@@ -760,10 +770,7 @@ async def check_inactive_users():
                         if warning_sent == 1:  # Если уже отправляли первое предупреждение
                             await bot.send_message(
                                 chat_id=chat_id,
-                                text="❌ <b>Ваши данные удалены</b>\n\n"
-                                     "Вы не заходили в бота 5 дней.\n"
-                                     "Все ваши данные (очки, жетоны, прогресс) были удалены.\n\n"
-                                     "Используйте /startLohotron для начала заново.",
+                                text=TEXT_DELETE_INACTIVE,
                                 parse_mode=ParseMode.HTML
                             )
                         # Удаляем данные пользователя
