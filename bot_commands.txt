@@ -1,0 +1,6 @@
+startLohotron - Показать справку и правила игры
+spinLohotron - Крутить слот-машину (15 жетонов)
+exchangeLohotron - Обменять 50 очков на 5 жетонов
+ratingLohotron - Показать ТОП-10 игроков чата
+myInventory - Показать ваши жетоны и очки
+
