@@ -5,7 +5,7 @@ import asyncio
 import aiosqlite
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, StarPayment
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.enums import ParseMode
 
 # Получаем токен из переменных окружения или используем значение по умолчанию
@@ -62,16 +62,16 @@ async def get_keyboard_with_stars(user_id, chat_id):
             last_star_spin, last_star_boost, boost_until = row
             current_time = now()
             
-            # Кнопка крутки за 1 звезду (если прошло 10 минут)
+            # Кнопка крутки за 1 звезду (если прошло 10 минут) - ТЕСТОВЫЙ РЕЖИМ
             if current_time - last_star_spin >= STAR_SPIN_COOLDOWN:
                 star_buttons.append(
-                    InlineKeyboardButton(text="⭐ Крутить вне очереди (1⭐)", callback_data="star_spin_1")
+                    InlineKeyboardButton(text="⭐ Крутить вне очереди (1⭐ ТЕСТ)", callback_data="test_star_spin_1")
                 )
             
-            # Кнопка буста за 3 звезды (если прошло 1 час)
+            # Кнопка буста за 3 звезды (если прошло 1 час) - ТЕСТОВЫЙ РЕЖИМ
             if current_time - last_star_boost >= STAR_BOOST_COOLDOWN:
                 star_buttons.append(
-                    InlineKeyboardButton(text="⚡ Уменьшить интервал на 1ч (3⭐)", callback_data="star_boost_3")
+                    InlineKeyboardButton(text="⚡ Уменьшить интервал на 1ч (3⭐ ТЕСТ)", callback_data="test_star_boost_3")
                 )
         
         if star_buttons:
@@ -364,11 +364,11 @@ async def handle_callback(callback: CallbackQuery):
         logger.error(f"Ошибка в обработчике кнопок: {e}")
         await callback.answer("❌ Произошла ошибка", show_alert=True)
 
-# ---------------- STAR PAYMENTS ----------------
+# ---------------- STAR PAYMENTS (ТЕСТОВЫЙ РЕЖИМ) ----------------
 
-@dp.callback_query(lambda c: c.data.startswith("star_"))
-async def handle_star_button(callback: CallbackQuery):
-    """Обработчик нажатий на кнопки со звездами"""
+@dp.callback_query(lambda c: c.data.startswith("test_star_"))
+async def handle_test_star_button(callback: CallbackQuery):
+    """Обработчик нажатий на тестовые кнопки со звездами (без реальных платежей)"""
     try:
         user = callback.from_user
         chat_id = callback.message.chat.id
@@ -388,149 +388,56 @@ async def handle_star_button(callback: CallbackQuery):
             last_star_spin, last_star_boost = row
             current_time = now()
             
-            if data == "star_spin_1":
+            if data == "test_star_spin_1":
                 # Проверяем кулдаун
                 if current_time - last_star_spin < STAR_SPIN_COOLDOWN:
                     wait = STAR_SPIN_COOLDOWN - (current_time - last_star_spin)
                     await callback.answer(f"⏳ Кнопка будет доступна через {wait//60} мин", show_alert=True)
                     return
                 
-                # Создаем платеж за 1 звезду через Stars
-                await bot.send_star_payment(
-                    chat_id=chat_id,
-                    title="Крутка вне очереди",
-                    description="Крутить слот-машину без ожидания",
-                    payload=f"star_spin_{user.id}_{chat_id}",
-                    star_count=1
+                # ТЕСТОВЫЙ РЕЖИМ: сразу выполняем действие без платежа
+                # Обновляем время последней звездной крутки
+                await db.execute(
+                    "UPDATE users SET last_star_spin=? WHERE user_id=? AND chat_id=?",
+                    (now(), user.id, chat_id)
                 )
+                # Сбрасываем таймер обычной крутки
+                await db.execute(
+                    "UPDATE users SET last_spin=0 WHERE user_id=? AND chat_id=?",
+                    (user.id, chat_id)
+                )
+                await db.commit()
                 
-            elif data == "star_boost_3":
+                # Выполняем крутку
+                await perform_spin(user.id, chat_id, star_spin=True)
+                await callback.answer("✅ Крутка вне очереди выполнена! (ТЕСТ)", show_alert=False)
+                
+            elif data == "test_star_boost_3":
                 # Проверяем кулдаун
                 if current_time - last_star_boost < STAR_BOOST_COOLDOWN:
                     wait = STAR_BOOST_COOLDOWN - (current_time - last_star_boost)
                     await callback.answer(f"⏳ Кнопка будет доступна через {wait//60} мин", show_alert=True)
                     return
                 
-                # Создаем платеж за 3 звезды через Stars
-                await bot.send_star_payment(
-                    chat_id=chat_id,
-                    title="Уменьшить интервал круток",
-                    description="Интервал круток уменьшен до 5 минут на 1 час",
-                    payload=f"star_boost_{user.id}_{chat_id}",
-                    star_count=3
+                # ТЕСТОВЫЙ РЕЖИМ: сразу выполняем действие без платежа
+                # Обновляем время последнего буста и устанавливаем время окончания буста
+                boost_until = now() + STAR_BOOST_DURATION
+                await db.execute(
+                    "UPDATE users SET last_star_boost=?, boost_until=? WHERE user_id=? AND chat_id=?",
+                    (now(), boost_until, user.id, chat_id)
                 )
-        
-        await callback.answer()
-    except Exception as e:
-        logger.error(f"Ошибка в обработчике звездных кнопок: {e}")
-        await callback.answer("❌ Произошла ошибка", show_alert=True)
-
-@dp.pre_checkout_star_payment()
-async def pre_checkout_star_payment(pre_checkout: types.PreCheckoutQuery):
-    """Подтверждение платежа звездами"""
-    try:
-        payload = pre_checkout.invoice_payload
-        
-        if payload.startswith("star_spin_"):
-            # Проверяем кулдаун для крутки
-            parts = payload.split("_")
-            user_id = int(parts[2])
-            chat_id = int(parts[3])
-            
-            async with aiosqlite.connect(DB) as db:
-                cur = await db.execute(
-                    "SELECT last_star_spin FROM users WHERE user_id=? AND chat_id=?",
-                    (user_id, chat_id)
-                )
-                row = await cur.fetchone()
-                if row and now() - row[0] < STAR_SPIN_COOLDOWN:
-                    await pre_checkout.answer(ok=False, error_message="Кнопка еще недоступна")
-                    return
-            
-            await pre_checkout.answer(ok=True)
-            
-        elif payload.startswith("star_boost_"):
-            # Проверяем кулдаун для буста
-            parts = payload.split("_")
-            user_id = int(parts[2])
-            chat_id = int(parts[3])
-            
-            async with aiosqlite.connect(DB) as db:
-                cur = await db.execute(
-                    "SELECT last_star_boost FROM users WHERE user_id=? AND chat_id=?",
-                    (user_id, chat_id)
-                )
-                row = await cur.fetchone()
-                if row and now() - row[0] < STAR_BOOST_COOLDOWN:
-                    await pre_checkout.answer(ok=False, error_message="Кнопка еще недоступна")
-                    return
-            
-            await pre_checkout.answer(ok=True)
-        else:
-            await pre_checkout.answer(ok=False, error_message="Неизвестный платеж")
-            
-    except Exception as e:
-        logger.error(f"Ошибка в pre_checkout: {e}")
-        await pre_checkout.answer(ok=False, error_message="Ошибка обработки платежа")
-
-@dp.star_payment()
-async def process_star_payment(star_payment: StarPayment):
-    """Обработка успешного платежа звездами"""
-    try:
-        payload = star_payment.invoice_payload
-        user = star_payment.from_user
-        chat_id = star_payment.chat.id
-        stars = star_payment.star_count
-        
-        logger.info(f"Обработка платежа звездами: {stars} звезд от {user.id}")
-        
-        async with aiosqlite.connect(DB) as db:
-            if payload.startswith("star_spin_"):
-                # Крутка вне очереди за 1 звезду
-                if stars == 1:
-                    # Обновляем время последней звездной крутки
-                    await db.execute(
-                        "UPDATE users SET last_star_spin=? WHERE user_id=? AND chat_id=?",
-                        (now(), user.id, chat_id)
-                    )
-                    # Сбрасываем таймер обычной крутки
-                    await db.execute(
-                        "UPDATE users SET last_spin=0 WHERE user_id=? AND chat_id=?",
-                        (user.id, chat_id)
-                    )
-                    await db.commit()
-                    
-                    # Выполняем крутку
-                    await perform_spin(user.id, chat_id, star_spin=True)
-                    await star_payment.answer(ok=True)
-                else:
-                    await star_payment.answer(ok=False, error_message="Неверное количество звезд")
-                    
-            elif payload.startswith("star_boost_"):
-                # Буст за 3 звезды
-                if stars == 3:
-                    # Обновляем время последнего буста и устанавливаем время окончания буста
-                    boost_until = now() + STAR_BOOST_DURATION
-                    await db.execute(
-                        "UPDATE users SET last_star_boost=?, boost_until=? WHERE user_id=? AND chat_id=?",
-                        (now(), boost_until, user.id, chat_id)
-                    )
-                    await db.commit()
-                    
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=f"⚡ Буст активирован! Интервал круток уменьшен до 5 минут на 1 час!",
-                        reply_markup=await get_keyboard_with_stars(user.id, chat_id)
-                    )
-                    await star_payment.answer(ok=True)
-                else:
-                    await star_payment.answer(ok=False, error_message="Неверное количество звезд")
-            else:
-                await star_payment.answer(ok=False, error_message="Неизвестный платеж")
+                await db.commit()
                 
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⚡ Буст активирован! Интервал круток уменьшен до 5 минут на 1 час! (ТЕСТ)",
+                    reply_markup=await get_keyboard_with_stars(user.id, chat_id)
+                )
+                await callback.answer("✅ Буст активирован! (ТЕСТ)", show_alert=False)
+        
     except Exception as e:
-        logger.error(f"Ошибка обработки платежа звездами: {e}")
-        await star_payment.answer(ok=False, error_message="Ошибка обработки платежа")
+        logger.error(f"Ошибка в обработчике тестовых звездных кнопок: {e}")
+        await callback.answer("❌ Произошла ошибка", show_alert=True)
 
 async def perform_spin(user_id, chat_id, star_spin=False):
     """Выполняет крутку (используется для обычной и звездной крутки)"""
