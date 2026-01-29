@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.enums import ParseMode
+from config import *
 
 # Настройка логирования
 logging.basicConfig(
@@ -31,8 +32,6 @@ if os.path.exists("/data"):
 elif not os.path.exists(DB_PATH):
     os.makedirs(DB_PATH, exist_ok=True)
 DB = os.path.join(DB_PATH, "lohotron.db")
-
-EMOJIS = ["🍎", "🍌", "🍺", "💩", "🤡", "🐸", "🍩", "⭐"]
 
 # Клавиатура с кнопками команд (используем описания из setup_commands.py)
 def get_command_keyboard():
@@ -79,13 +78,13 @@ async def get_keyboard_with_stars(user_id, chat_id):
             current_time = now()
             
             # Кнопка крутки за 1 звезду (если прошло 10 минут) - ТЕСТОВЫЙ РЕЖИМ
-            if current_time - last_star_spin >= STAR_SPIN_COOLDOWN:
+            if ENABLE_STAR_SPIN and current_time - last_star_spin >= STAR_SPIN_COOLDOWN:
                 star_buttons.append(
                     InlineKeyboardButton(text="⭐ Крутить вне очереди (1⭐ ТЕСТ)", callback_data="test_star_spin_1")
                 )
             
             # Кнопка буста за 3 звезды (если прошло 1 час) - ТЕСТОВЫЙ РЕЖИМ
-            if current_time - last_star_boost >= STAR_BOOST_COOLDOWN:
+            if ENABLE_STAR_BOOST and current_time - last_star_boost >= STAR_BOOST_COOLDOWN:
                 star_buttons.append(
                     InlineKeyboardButton(text="⚡ Уменьшить интервал на 1ч (3⭐ ТЕСТ)", callback_data="test_star_boost_3")
                 )
@@ -128,6 +127,23 @@ async def init_db():
         )
         """)
         await db.commit()
+        
+        # Миграция: добавляем новые поля если их нет
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN last_activity INTEGER DEFAULT 0")
+            await db.commit()
+            logger.info("Добавлена колонка last_activity")
+        except Exception as e:
+            if "duplicate column name" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning(f"Ошибка при добавлении last_activity: {e}")
+        
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN warning_sent INTEGER DEFAULT 0")
+            await db.commit()
+            logger.info("Добавлена колонка warning_sent")
+        except Exception as e:
+            if "duplicate column name" not in str(e).lower() and "already exists" not in str(e).lower():
+                logger.warning(f"Ошибка при добавлении warning_sent: {e}")
 
 # ---------------- HELPERS ----------------
 
@@ -326,8 +342,8 @@ async def spin(msg: Message):
             # Списываем жетоны
             tokens -= SPIN_COST
 
-            # Отправляем сообщение со слотами (анимация кручения)
-            spin_msg = await msg.reply("🎰 Крутим слоты...")
+            # Отправляем сообщение со слотами (анимация кручения) - новым сообщением
+            spin_msg = await bot.send_message(chat_id=chat_id, text="🎰 Крутим слоты...")
             
             # Анимация кручения: каждый слот обновляется 3 раза, затем фиксируется
             for slot_index in range(5):  # 5 слотов
@@ -375,14 +391,16 @@ async def spin(msg: Message):
             """, (points, tokens, current_time, current_time, user.id, chat_id))
             await db.commit()
 
-            # Отправляем результаты с кнопками
+            # Отправляем результаты с кнопками - ответом на сообщение со слотами
             await asyncio.sleep(0.5)
             boost_text = " ⚡ (Буст активен!)" if (boost_until and now() < boost_until) else ""
-            await msg.reply(
-                f"👉 {text}\n"
-                f"🏆 +{win} очков\n"
-                f"💰 Очки: {points}\n"
-                f"🎟 Жетоны: {tokens}{boost_text}",
+            await bot.send_message(
+                chat_id=chat_id,
+                text=f"👉 {text}\n"
+                     f"🏆 +{win} очков\n"
+                     f"💰 Очки: {points}\n"
+                     f"🎟 Жетоны: {tokens}{boost_text}",
+                reply_to_message_id=spin_msg.message_id,
                 reply_markup=await get_keyboard_with_stars(user.id, chat_id)
             )
     except Exception as e:
@@ -691,6 +709,7 @@ async def perform_spin(user_id, chat_id, star_spin=False):
                      f"🏆 +{win} очков\n"
                      f"💰 Очки: {points}\n"
                      f"🎟 Жетоны: {tokens}{boost_text}{star_text}",
+                reply_to_message_id=spin_msg.message_id,
                 reply_markup=await get_keyboard_with_stars(user_id, chat_id)
             )
     except Exception as e:
