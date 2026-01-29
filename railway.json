@@ -7,6 +7,12 @@
     "startCommand": "python LohotronBot.py",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 10
-  }
+  },
+  "volumes": [
+    {
+      "mountPath": "/data",
+      "size": 1
+    }
+  ]
 }
 

@@ -14,7 +14,15 @@ TOKEN = os.getenv("BOT_TOKEN", "8540229374:AAH-V-8TGx7obKTd9FoRc30pSj1I-6rpk88")
 bot = Bot(TOKEN)
 dp = Dispatcher()
 
-DB = "lohotron.db"
+# Используем постоянное хранилище для базы данных
+# На Railway: /data для Volume, локально: текущая директория
+DB_PATH = os.getenv("DB_PATH", ".")
+# Проверяем, существует ли /data (Railway Volume)
+if os.path.exists("/data"):
+    DB_PATH = "/data"
+elif not os.path.exists(DB_PATH):
+    os.makedirs(DB_PATH, exist_ok=True)
+DB = os.path.join(DB_PATH, "lohotron.db")
 
 EMOJIS = ["🍎", "🍌", "🍺", "💩", "🤡", "🐸", "🍩", "⭐"]
 
@@ -100,7 +108,7 @@ async def init_db():
             user_id INTEGER,
             chat_id INTEGER,
             points INTEGER DEFAULT 0,
-            tokens INTEGER DEFAULT 50,
+            tokens INTEGER DEFAULT 100,
             last_spin INTEGER DEFAULT 0,
             last_daily INTEGER DEFAULT 0,
             last_star_spin INTEGER DEFAULT 0,
@@ -160,6 +168,7 @@ async def start(msg: Message):
 /myInventory@LohotronRuletBot - Показать ваши жетоны и очки
 
 <b>Правила:</b>
+• Начальное количество: 100 жетонов
 • Каждый день получаешь 50 жетонов
 • Кулдаун между крутками: 10 минут
 • Выигрыши: 2 одинаковых = 5 очков, 3 = 7 очков, 4 = 10 очков, 5 = 15 очков
@@ -176,8 +185,9 @@ async def spin(msg: Message):
         chat_id = msg.chat.id
 
         async with aiosqlite.connect(DB) as db:
+            # Создаем пользователя с начальными значениями (100 жетонов, last_daily = 0 для нового пользователя)
             await db.execute(
-                "INSERT OR IGNORE INTO users (user_id, chat_id) VALUES (?,?)",
+                "INSERT OR IGNORE INTO users (user_id, chat_id, tokens, last_daily) VALUES (?,?,100,0)",
                 (user.id, chat_id)
             )
             await db.commit()
@@ -195,8 +205,8 @@ async def spin(msg: Message):
             # Определяем текущий кулдаун (с учетом буста)
             current_cooldown = COOLDOWN_BOOSTED if (boost_until and now() < boost_until) else COOLDOWN
 
-            # DAILY TOKENS
-            if now() - last_daily > 86400:
+            # DAILY TOKENS (только если прошло больше 24 часов и last_daily не равен 0)
+            if last_daily > 0 and now() - last_daily > 86400:
                 tokens += DAILY_TOKENS
                 await db.execute(
                     "UPDATE users SET tokens=?, last_daily=? WHERE user_id=? AND chat_id=?",
@@ -322,11 +332,11 @@ async def inventory(msg: Message):
             if not row:
                 # Если пользователь еще не играл, создаем запись
                 await db.execute(
-                    "INSERT OR IGNORE INTO users (user_id, chat_id) VALUES (?,?)",
+                    "INSERT OR IGNORE INTO users (user_id, chat_id, tokens, last_daily) VALUES (?,?,100,0)",
                     (user.id, chat_id)
                 )
                 await db.commit()
-                tokens, points = 50, 0  # Начальные значения
+                tokens, points = 100, 0  # Начальные значения
             else:
                 tokens, points = row
 
